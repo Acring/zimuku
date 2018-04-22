@@ -74,6 +74,7 @@ def get_sub(number):
     :param number: 要请求的的字幕序号
     :return: content
     """
+    response = None
     try:
         s = requests.session()
         _url = 'http://www.subku.net/dld/{}.html'.format(number)
@@ -85,8 +86,12 @@ def get_sub(number):
         print(proxies)
         r = s.get(_url, proxies=proxies, timeout=5)
 
-        _dld_url = re.findall(r'href="(http://www.subku.net/download/.*?bk2)"', r.text)[0]
-
+        _dld_url = re.findall(r'href="(http://www.subku.net/download/.*?bk2)"', r.text)
+        if _dld_url:
+            _dld_url = _dld_url[0]
+        else:
+            print('无法获取下载链接')
+            return None, None
         headers = {
             'referer': "http://www.subku.net/dld/{}.html".format(number),
             'user-agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/65.\
@@ -100,14 +105,33 @@ def get_sub(number):
         }
 
         response = s.get(_dld_url, headers=headers, stream=True, proxies=proxies, timeout=5)
-        if not response.ok:
+        if not response.ok:  # 获取失败
             print(number, response)
             return None, None
-        filename = re.findall(r'filename="(.*?)"', response.headers['Content-Disposition'])[0]
-
+        content_dis = response.headers['Content-Disposition']
+        if not content_dis:
+            print(response.text)
+            return None,None
+        filename = re.findall(r'filename="(.*?)"', content_dis)
+        if filename:
+            filename = filename[0]
+        else:
+            print('获取文件名失败')
+            print('header:', response)
+            return None
         return filename, response.content
+
+    except requests.ConnectTimeout as e:
+        print('连接代理服务器超时:', e)
+        return None, None
+    except requests.ReadTimeout as e:
+        print('读取代理服务器出错', e)
+        return None, None
+    except KeyError as e:
+        print('无法获取请求头{}, 可能该代理已超过下载次数'.format(e))
+        return None, None
     except Exception as e:
-        print(e)
+        print('其他错误:{}'.format(e))
         return None, None
 
 
@@ -132,11 +156,11 @@ def get_proxy():
 
 
 def main():
-    start = 1662
+    start = 1750
     end = 10000
     for index, url in url_iterator(start, end):
         if not index % 10:
-            print('in: #', index)
+            print('at : #', index)
         # time.sleep(random.randint(3, 7))
         r = requests.get(url, timeout=5)
         if not filter_sub(r.text, 'en', 'srt'):
