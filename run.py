@@ -40,7 +40,6 @@ def filter_sub(html, lang, sub_format):
     }
     _format_dic = {
         'srt': 'SRT',
-
     }
     if isinstance(html, type(str)):
         raise TypeError('html should be str but it is {}'.format(type(html)))
@@ -131,8 +130,9 @@ def get_proxy():
     except ConnectionError:
         return None
 
-if __name__ == '__main__':
-    start = 1580
+
+def main():
+    start = 1662
     end = 10000
     for index, url in url_iterator(start, end):
         if not index % 10:
@@ -145,3 +145,7 @@ if __name__ == '__main__':
         while not content:
             name, content = get_sub(index)
         save(name, content)
+
+
+if __name__ == '__main__':
+    main()

@@ -24,7 +24,22 @@ git clone git@github.com:Acring/zimuku.git
 
 ## 使用
 
+在main函数中修改变量
+
+- start(要获取的第一个资源的下标)
+- end(要获取的最后一个资源的下标)
+- filter_sub的筛选条件(字幕语言和字幕格式)
+
+运行脚本
+
 ```bash
 python3 run.py
 ```
 
+
+
+## 特别说明
+
+
+
+如果遇到一直返回`<Response [404]>`， 可以开启fiddler作为代理服务器再去运行脚本，原因暂时不了解
