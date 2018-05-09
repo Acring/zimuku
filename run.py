@@ -36,14 +36,21 @@ def filter_sub(html, lang, sub_format):
     _lang_dic = {
         'en': 'English字幕',
         'ch': '简体中文字幕',
-        'tch': '繁體中文字幕'
+        'tch': '繁體中文字幕',
+        'mul': '双语字幕'
     }
     _format_dic = {
         'srt': 'SRT',
+        'ass': 'ASS',
+        'ass/ssa': 'ASS/SSA'
     }
     if isinstance(html, type(str)):
         raise TypeError('html should be str but it is {}'.format(type(html)))
-
+    if lang not in _lang_dic:
+        raise KeyError('Lang should be one of(en,ch, tch, mul) but it is {}'.format(lang))
+    if sub_format not in _format_dic:
+        raise KeyError('sub_format should be one of(srt, ass, ass/ssa)')
+        
     _sub_lang = re.findall(r'<b>字幕语言.*?alt="(.*?)"', html, re.S)
 
     if not len(_sub_lang):
@@ -99,8 +106,11 @@ def get_sub_content(number, url, proxies):
     headers = {
         'referer': "http://www.subku.net/dld/{}.html".format(number),
     }
-
-    res = requests.get(url, headers=headers, stream=True, proxies=proxies)
+    try:
+        res = requests.get(url, headers=headers, stream=True, proxies=proxies)
+    except requests.exceptions.ProxyError as e:
+        print('该代理已过期或无法使用')
+        return None, None
 
     if res.status_code == 404 and res.history:  # 代理的情况下需要重新用响应的url再请求一遍
         res = requests.get(res.url)
@@ -129,6 +139,11 @@ def get_sub_content(number, url, proxies):
 
 
 def save(filename, content):
+    """
+    保存获取到的文件
+    :param filename: 获取文件名
+    :param content: 文件内容
+    """
     filename.replace(' ', '')
     if not os.path.exists('sub'):
         os.mkdir('sub')
@@ -154,7 +169,7 @@ def main():
     proxy = get_proxy()
     proxies = {'http': 'http://{}/'.format(proxy.strip('\r\n'))} if proxy else None
 
-    start = 12309
+    start = 13182
     end = 20000
     for index, url in url_iterator(start, end):
         error_count = 0
@@ -165,7 +180,7 @@ def main():
         try:  # 获取字幕详情界面
             r = requests.get(url, timeout=5)
         except Exception as e:
-            print('访问官网失败: {}'.format(e))
+            print('访问官网失败, 请检查网络: {}'.format(e))
             r = None
 
         if not filter_sub(r.text, 'en', 'srt'):  # 检测字幕语言和字幕格式
@@ -177,7 +192,7 @@ def main():
         while not content:
             error_count += 1
 
-            proxy = get_proxy()
+            proxy = get_proxy()  # 报错的情况下尝试切换代理
             proxies = {'http': 'http://{}/'.format(proxy.strip('\r\n'))} if proxy else None
 
             name, content = get_sub_content(index, _dld_url, proxies)
