@@ -9,19 +9,21 @@ import time
 """
 爬取字幕库的字幕文件
 """
+proxies = {}
 
-def wrapper(func):
+def switch_proxies(func):
     """
     爬取失败时切换代理
     """
-    def get_sub(number, proxies):
-        name, content = func(number, proxies)
-        if not name: # 返回为None
-            proxies = get_proxies()
-            name, conent = func(number, proxies)
-            if not name:  # 如果下载依然失败则报错
-                raise Exception('发生未知错误，下载失败')
-        return name, content
+    def get_sub(*args, **kwargs):
+        result = func(*args, **kwargs)
+        if not result: # 返回为None
+            print('正在切换代理')
+            get_proxies()
+            result = func(*args, **kwargs)
+            if not result:  # 如果下载依然失败则报错
+                raise Exception('切换代理后函数依然无法正常工作')
+        return result
     return get_sub
 
 def url_iterator(start, end):
@@ -31,7 +33,6 @@ def url_iterator(start, end):
     :param end: 结束下标
     :return:
     """
-    print('iter')
     url = 'https://www.zimuku.cn/detail/{}.html'
     for index in range(start, end):
         yield index, url.format(index)
@@ -86,8 +87,8 @@ def filter_sub(html, lang, sub_format):
 
     return True
 
-
-def get_dld_url(number, proxies):
+@switch_proxies
+def get_dld_url(number):
     """
     获取字幕文件下载地址
     :param number:
@@ -95,9 +96,12 @@ def get_dld_url(number, proxies):
     """
     _url = 'http://www.subku.net/dld/{}.html'.format(number)
     try:
-        r = requests.get(_url, proxies=proxies)
+        r = requests.get(_url, proxies=proxies, timeout=20)
     except requests.exceptions.ProxyError as e:
         print('该代理已过期或无法使用')
+        return None
+    except requests.exceptions.ConnectTimeout as e:
+        print('代理服务器连接超时')
         return None
     _dld_url = re.findall(r'href="(http://www.subku.net/download/.*?bk2)"', r.text)
     if _dld_url:
@@ -107,47 +111,47 @@ def get_dld_url(number, proxies):
         raise Exception('无法获取下载链接')
     return _dld_url
 
-
-def get_sub_content(number, url, proxies):
+@switch_proxies
+def get_sub_content(number, url):
     """
     获取字幕文件
     :param number:
     :param url:
-    :param proxies:
     :return:
     """
     headers = {
         'referer': "http://www.subku.net/dld/{}.html".format(number),
     }
     try:
-        res = requests.get(url, headers=headers, stream=True, proxies=proxies)
+        res = requests.get(url, headers=headers, stream=True, proxies=proxies, timeout=20)
     except requests.exceptions.ProxyError as e:
         print('该代理已过期或无法使用')
-        return None, None
+        return None
 
     if res.status_code == 404 and res.history:  # 代理的情况下需要重新用响应的url再请求一遍
         res = requests.get(res.url)
         if res.status_code != 200:
-            return None, None
+            return None
     else:
         print(res.history, res.url)
-        print(res.text)
+        if len(re.findall('超出字幕下载次数', res.text)):
+            print('超出字幕下载次数')
         logging.error('下载失败，且未获取到真实下载地址.')
-        return None, None
+        return None
 
     try:
         content_dis = res.headers['Content-Disposition']  # 获取头部文件信息
     except KeyError:
         print('获取content-disposition失败，文件可能损坏')
         logging.debug(res.text)
-        return None, None
+        return None
 
     try:
         filename = re.findall(r'filename="(.*?)"', content_dis)[0]
     except IndexError:
         print('获取文件名失败，文件可能损坏')
         logging.debug(res.text)
-        return None, None
+        return None
 
     return filename, res.content
 
@@ -181,32 +185,28 @@ def get_proxies():
                      'cs=1&lb=1&sb=0&pb=4&mr=1&regions='
 
     try:
-        proxies = {}
+        global proxies
         response = requests.get(PROXY_POOL_HTTP)
         if response.status_code == 200:
             proxies['http'] = 'http://{}/'.format(response.text.strip('\r\n'))
-
         print('proxies:', proxies)
-        return proxies
     except Exception as e:
         print(e)
-        return None
 
 
 def main():
 
-    proxies = get_proxies()
+    get_proxies()
 
-    start = 15895
+    start = 17881
     end = 20000
 
     for index, url in url_iterator(start, end):
-        error_count = 0
-
+        time.sleep(random.randint(4,6))  # 友好的爬虫
         print('at : #', index)
 
         try:  # 获取字幕详情界面
-            r = requests.get(url, proxies=proxies)
+            r = requests.get(url, proxies=proxies, timeout=20)
         except Exception as e:
             print('访问官网失败, 请检查网络: {}'.format(e))
             return
@@ -215,9 +215,9 @@ def main():
             continue
 
 
-        _dld_url = get_dld_url(index, proxies)
+        _dld_url = get_dld_url(number=index)
 
-        name, content = get_sub_content(index, _dld_url, proxies)
+        name, content = get_sub_content(number=index, url=_dld_url)
 
         save(name, content)
 
