@@ -5,11 +5,13 @@ import requests
 import re
 import logging
 import time
+from bs4 import BeautifulSoup as bs
 
 """
 爬取字幕库的字幕文件
 """
 proxies = {}
+
 
 def switch_proxies(func):
     """
@@ -25,6 +27,7 @@ def switch_proxies(func):
                 raise Exception('切换代理后函数依然无法正常工作')
         return result
     return get_sub
+
 
 def url_iterator(start, end):
     """
@@ -43,7 +46,7 @@ def filter_sub(html, lang, sub_format):
     过滤器
     :param html: 网址HTML纯文本
     :param lang: 需要的字幕语言 暂支持： en-英语 ch-中文简体 tch-繁体中文
-    :param sub_format: 需要的字幕格式 暂支持: srt
+    :param sub_format: 需要的字幕格式 暂支持: srt， ass, ass/ssa
     :return:
     """
     _lang_dic = {
@@ -64,28 +67,28 @@ def filter_sub(html, lang, sub_format):
     if sub_format not in _format_dic:
         raise KeyError('sub_format should be one of(srt, ass, ass/ssa)')
 
-    _sub_lang = re.findall(r'<b>字幕语言.*?alt="(.*?)"', html, re.S)
-
-    if not len(_sub_lang):
-        print('lang not found')
+    soup = bs(html, 'lxml')
+    try:
+        _sub_lang = soup.select('.subinfo li')[0].img['title']
+        logging.info(_sub_lang)
+    except IndexError as e:
+        print('获取字幕语言失败')
         return False
 
-    _sub_lang = _sub_lang[0]
-    if _lang_dic[lang] != _sub_lang:  # 该页面的字幕不符合
+    if _lang_dic[lang] != _sub_lang:
         return False
 
-    _sub_format = re.findall(r'字幕格式：</b><span class="label label-info">(.*?)<', html, re.S)
-
-    if not len(_sub_format):
-        print('format not found')
+    try:
+        _sub_format = soup.select('.subinfo li')[1].span.string
+        logging.info(_sub_format)
+    except IndexError as e:
+        print('获取字幕格式失败')
         return False
-
-    _sub_format = _sub_format[0]
-
     if _format_dic[sub_format] != _sub_format:
         return False
 
     return True
+
 
 @switch_proxies
 def get_dld_url(number):
@@ -98,18 +101,21 @@ def get_dld_url(number):
     try:
         r = requests.get(_url, proxies=proxies, timeout=20)
     except requests.exceptions.ProxyError as e:
-        print('该代理已过期或无法使用')
+        print(e, '该代理已过期或无法使用')
         return None
     except requests.exceptions.ConnectTimeout as e:
         print('代理服务器连接超时')
         return None
-    _dld_url = re.findall(r'href="(http://www.subku.net/download/.*?bk2)"', r.text)
-    if _dld_url:
-        _dld_url = _dld_url[0]
-    else:
-        print('无法获取下载链接')
-        raise Exception('无法获取下载链接')
+    # _dld_url = re.findall(r'href="(http://www.subku.net/download/.*?bk2)"', r.text)
+
+    soup = bs(r.text, 'lxml')
+    try:
+        _dld_url = soup.select('.down')[0].find_all(name='li')[-2].a['href']
+    except Exception as e:
+        print(e, '获取下载地址失败')
+        raise Exception('获取下载地址失败')
     return _dld_url
+
 
 @switch_proxies
 def get_sub_content(number, url):
@@ -162,7 +168,7 @@ def save(filename, content):
     :param filename: 获取文件名
     :param content: 文件内容
     """
-    if not filename :
+    if not filename:
         print('文件名为空')
         return
     if not content:
@@ -174,7 +180,6 @@ def save(filename, content):
     with open(os.path.join('sub', filename), 'wb') as f:
         f.write(content)
         print('[√] file: {}, saved'.format(filename[:30]))
-
 
 
 def get_proxies():
@@ -194,15 +199,54 @@ def get_proxies():
         print(e)
 
 
+def get_work_names(html):
+    """
+    获取电影/美剧的中文和英文名称
+    电影/美剧名称是一大类，比如一个美剧可能有几个字幕文件
+    :return:
+    """
+    soup = bs(html, 'lxml')
+    result = soup.select('.md_tt')[0].a.string.split('/')
+    return result[0], result[1]
+
+
+def save_sub_cover(html, name):
+    """
+    保存电影封面
+    :param html:
+    :return:
+    """
+    print('保存封面')
+    soup = bs(html, 'lxml')
+    img_url = soup.select('.md_img')[0].img['src']
+    r = requests.get('http:{}'.format(img_url))
+
+    if not os.path.exists('cover'):  # 不存在封面文件夹
+        os.mkdir('cover')
+
+    with open('cover/{}.jpg'.format(name), 'wb') as f:
+        f.write(r.content)
+
+
+def get_sub_name(html):
+    """
+    获取字幕名称
+    :param html:
+    :return:
+    """
+    soup = bs(html, 'lxml')
+    return soup.select('.md_tt')[0].h1['title']
+
+
 def main():
 
     get_proxies()
 
-    start = 17881
+    start = 18049
     end = 20000
 
     for index, url in url_iterator(start, end):
-        time.sleep(random.randint(4,6))  # 友好的爬虫
+        time.sleep(random.randint(2, 4))  # 友好的爬虫
         print('at : #', index)
 
         try:  # 获取字幕详情界面
@@ -213,7 +257,9 @@ def main():
 
         if not filter_sub(r.text, 'en', 'srt'):  # 检测字幕语言和字幕格式
             continue
-
+        work_names_zh, work_names_en = get_work_names(r.text)  # 获取电影/美剧名称
+        sub_name = get_sub_name(r.text)  # 获取字幕名称
+        save_sub_cover(r.text, work_names_zh)  # 保存字幕封面
 
         _dld_url = get_dld_url(number=index)
 
@@ -223,4 +269,5 @@ def main():
 
 
 if __name__ == '__main__':
+    logging.basicConfig(format="%(levelname)s : %(message)s", level=logging.INFO)
     main()
