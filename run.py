@@ -1,12 +1,19 @@
 # coding=utf-8
 import os
 import random
+
+import chardet
 import requests
 import re
 import logging
 import time
 from bs4 import BeautifulSoup as bs
+import pymysql
 
+db = pymysql.connect("localhost", "root", "Mlf7netS", "v-tree")
+
+cursor = db.cursor()
+db.set_charset('utf8')
 """
 爬取字幕库的字幕文件
 """
@@ -71,7 +78,7 @@ def filter_sub(html, lang, sub_format):
     try:
         _sub_lang = soup.select('.subinfo li')[0].img['title']
         logging.info(_sub_lang)
-    except IndexError as e:
+    except Exception as e:
         print('获取字幕语言失败')
         return False
 
@@ -158,28 +165,52 @@ def get_sub_content(number, url):
         print('获取文件名失败，文件可能损坏')
         logging.debug(res.text)
         return None
-
     return filename, res.content
 
 
-def save(filename, content):
+def save(work_name_zh, work_name_en, sub_name, content):
     """
-    保存获取到的文件
-    :param filename: 获取文件名
-    :param content: 文件内容
+    保存到数据库
+    :param work_name_zh: 作品中文名
+    :param work_name_en: 作品英文名
+    :param sub_name: 字幕名称
+    :param content: 内容
+    :return:
     """
-    if not filename:
-        print('文件名为空')
+    if not sub_name:
+        print('字幕名为空')
         return
     if not content:
         print('文件内容为空')
         return
-    filename.replace(' ', '')
-    if not os.path.exists('sub'):
-        os.mkdir('sub')
-    with open(os.path.join('sub', filename), 'wb') as f:
-        f.write(content)
-        print('[√] file: {}, saved'.format(filename[:30]))
+    guess = chardet.detect(content)
+
+    if not guess['encoding']:
+        print('无法识别编码，跳过')
+        return
+    text = content.decode(guess['encoding'], errors='ignore')
+
+    # text = text.encode('utf-8')
+    lines = text.split('\n')
+    result = []
+    pos = 0
+    index = 0
+    while pos < len(lines):  # 获取
+        if lines[pos].strip().isdigit():
+            pos += 2
+            index += 1
+        if len(lines[pos].strip()):
+            result.append('{}: {}'.format(index, lines[pos]))
+        pos += 1
+    result = '\n'.join(result)
+    try:
+        sql = "INSERT INTO sub(work_name_zh, work_name_en, sub_name  , content) VALUES (%s, %s, %s, %s)"
+        cursor.execute(sql, (work_name_zh, work_name_en, sub_name, result))
+    except Exception as e:
+        print(e)
+        db.rollback()
+    db.commit()
+    print('[√] {}'.format(work_name_zh))
 
 
 def get_proxies():
@@ -216,7 +247,6 @@ def save_sub_cover(html, name):
     :param html:
     :return:
     """
-    print('保存封面')
     soup = bs(html, 'lxml')
     img_url = soup.select('.md_img')[0].img['src']
     r = requests.get('http:{}'.format(img_url))
@@ -242,11 +272,12 @@ def main():
 
     get_proxies()
 
-    start = 18049
+    start = 356
+
     end = 20000
 
     for index, url in url_iterator(start, end):
-        time.sleep(random.randint(2, 4))  # 友好的爬虫
+        # time.sleep(random.randint(2, 4))  # 友好的爬虫
         print('at : #', index)
 
         try:  # 获取字幕详情界面
@@ -264,10 +295,13 @@ def main():
         _dld_url = get_dld_url(number=index)
 
         name, content = get_sub_content(number=index, url=_dld_url)
-
-        save(name, content)
+        if not name.endswith('.srt'):
+            print(name)
+            print('非SRT文件，跳过')
+            continue
+        save(work_names_zh, work_names_en, sub_name, content)
 
 
 if __name__ == '__main__':
-    logging.basicConfig(format="%(levelname)s : %(message)s", level=logging.INFO)
+    # logging.basicConfig(format="%(levelname)s : %(message)s", level=logging.INFO)
     main()
